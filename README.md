@@ -76,14 +76,14 @@ curl "localhost:8081/meters?status=faulty&feeder=F-012"
 {
   "data": [
     {
-      "meterId": "J100004",
-      "serial": "SE65293",
+      "meterId": "J100039",
+      "serial": "AL96955",
       "make": "Genus",
       "phase": "single",
       "status": "faulty",
-      "installation": "ct_operated",
-      "dtCode": "DT-005",
-      "feederCode": "F-005",
+      "installation": "whole_current",
+      "dtCode": "DT-040",
+      "feederCode": "F-012",
       "readingSummary": {
         "firstReadingAt": "2026-06-23T23:30+05:30",
         "lastReadingAt": "2026-06-30T23:30+05:30",
@@ -94,7 +94,7 @@ curl "localhost:8081/meters?status=faulty&feeder=F-012"
     }
   ],
   "pageInfo": { "nextCursor": null, "limit": 50 },
-  "meta": { "generatedAt": "2026-11-04T17:41:02+00:00", "dataAgeSeconds": 12, "total": 1 }
+  "meta": { "generatedAt": "2026-11-04T17:43:04+00:00", "dataAgeSeconds": 50, "total": 6 }
 }
 ```
 
@@ -110,7 +110,9 @@ curl "localhost:8081/meters/J100000/consumption?interval=1d"
   "interval": "1d",
   "data": [
     { "start": "2026-06-24T00:00+05:30", "end": "2026-06-25T00:00+05:30",
-      "kwh": 20.24, "kvah": 21.87, "derived": true, "anomaly": null }
+      "kwh": 20.29, "kvah": 21.94, "derived": true, "anomaly": null },
+    { "start": "2026-06-25T00:00+05:30", "end": "2026-06-26T00:00+05:30",
+      "kwh": 20.29, "kvah": 21.94, "derived": true, "anomaly": null }
   ],
   "meta": {
     "sourceGranularity": "30m",
@@ -122,6 +124,9 @@ curl "localhost:8081/meters/J100000/consumption?interval=1d"
 }
 ```
 
+Note what is absent: no `"kwh": 48439.16` register values, no `"23/06/2026 23:30"`
+strings, no nulls dressed up as zeroes.
+
 The network tree, reconstructed from per-meter paths:
 
 ```bash
@@ -132,14 +137,27 @@ curl "localhost:8081/network/hierarchy?to=feeder"
 {
   "depth": "feeder",
   "roots": [
-    { "code": "Z-01", "name": "Jaipur Zone 1", "meters": 141,
+    { "code": "Z-01", "name": "Jaipur Zone 1", "meters": 143,
       "children": [
-        { "code": "C-01", "name": "Circle 1", "meters": 58,
-          "children": [ { "code": "F-001", "name": "Feeder 1", "meters": 12, "children": [] } ] }
+        { "code": "C-01", "name": "Circle 1", "meters": 72,
+          "children": [
+            { "code": "D-01", "name": "Division 1", "meters": 20,
+              "children": [
+                { "code": "SD-01", "name": "Subdivision 1", "meters": 10,
+                  "children": [
+                    { "code": "SS-01", "name": "Substation 1", "meters": 10,
+                      "children": [
+                        { "code": "F-001", "name": "Feeder 1", "meters": 10, "children": [] }
+                      ] }
+                  ] }
+              ] }
+          ] }
       ] }
   ]
 }
 ```
+
+Counts are conserved at every level: 143 + 130 + 130 zones = 403 meters.
 
 ---
 
@@ -161,8 +179,8 @@ Errors are RFC 9457 `application/problem+json` throughout:
 
 ```json
 { "type": "urn:urja:granularity-mismatch", "title": "Interval finer than the source data",
-  "status": 422, "detail": "Meter J100050 only has 1d readings in the portal; a 30m series would be fabricated.",
-  "instance": "/meters/J100050/consumption", "sourceGranularity": "1d" }
+  "status": 422, "detail": "Meter J100050 only has 1d readings in the portal; a 30m series would be fabricated. Use interval=auto or interval=1d.",
+  "instance": "/meters/J100050/consumption", "sourceGranularity": "1d", "requestedInterval": "30m" }
 ```
 
 Deliberately distinct: **`404`** means the meter does not exist; **`503`** means
@@ -241,7 +259,7 @@ the portal is unreachable and the request is worth retrying (`Retry-After` set).
 ## Testing
 
 ```bash
-uv run pytest -q      # 41 tests, ~1s, no network
+uv run pytest -q      # 43 tests, ~1s, no network
 ```
 
 * `tests/test_parse.py` — the portal's quirks as executable assertions:
