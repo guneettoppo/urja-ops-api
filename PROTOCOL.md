@@ -52,7 +52,7 @@ Set-Cookie: __Secure-better-auth.session_token=<token>; Max-Age=3600; Path=/; Ht
 Failure — `200` with an SvelteKit action failure body:
 
 ```json
-{"type":"failure","status":401,"data":"[{\"email\":1,\"error\":2},\"REDACTED\",\"Invalid email or password.\"]"}
+{"type":"failure","status":401,"data":"[{\"email\":1,\"error\":2},\"<operator login>\",\"Invalid email or password.\"]"}
 ```
 
 Two things worth knowing:
@@ -68,7 +68,7 @@ Two things worth knowing:
 
 ```json
 {"session":{"expiresAt":"2026-11-04T12:52:17.807Z","token":"54O6…","ipAddress":"…","userAgent":"curl/8.18.0"},
- "user":{"name":"Ops Desk","email":"REDACTED"}}
+ "user":{"name":"Ops Desk","email":"operator@<portal-domain>"}}
 ```
 
 ### What this means for a service
