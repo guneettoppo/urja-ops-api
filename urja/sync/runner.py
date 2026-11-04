@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from urja.config import settings
@@ -34,9 +35,31 @@ log = logging.getLogger(__name__)
 
 _sync_lock = asyncio.Lock()
 
+# A run that has been "running" for longer than this is assumed dead (crashed
+# process). Without this, one bad exit would block every future sync.
+STALE_RUN_MINUTES = 30
+
+
+def _db_run_active() -> bool:
+    """Cross-process guard: is a sync run marked in-flight in the database?
+
+    The asyncio lock alone only protects a single process, so a CLI sync and a
+    running server would otherwise sweep the portal simultaneously.
+    """
+    last = store.latest_sync_run()
+    if not last or last.get("state") != "running":
+        return False
+    try:
+        started = datetime.fromisoformat(last["started_at"])
+    except (TypeError, ValueError):
+        return False
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (datetime.now(tz=timezone.utc) - started) < timedelta(minutes=STALE_RUN_MINUTES)
+
 
 def is_running() -> bool:
-    return _sync_lock.locked()
+    return _sync_lock.locked() or _db_run_active()
 
 
 def _progress(done: int, total: int, phase: str) -> None:
@@ -46,7 +69,7 @@ def _progress(done: int, total: int, phase: str) -> None:
 
 async def run_sync(*, include_energy: bool = True) -> dict[str, Any]:
     """Perform one full or metadata-only sync. Returns a summary dict."""
-    if _sync_lock.locked():
+    if is_running():
         return {"state": "running", "skipped": True}
 
     async with _sync_lock:

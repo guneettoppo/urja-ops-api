@@ -171,6 +171,30 @@ def test_sync_status_reports_freshness(client):
     assert body["counts"]["lastReadingAt"].startswith("2026-06-30")
 
 
+def test_sync_is_blocked_while_another_run_is_in_flight(client):
+    """A run started by another process must be visible (the lock is DB-backed)."""
+    from urja.db import store
+
+    store.start_sync_run()
+    response = client.post("/sync")
+    assert response.status_code == 409
+    assert response.json()["type"] == "urn:urja:sync-in-flight"
+    assert client.get("/sync/status").json()["running"] is True
+
+
+def test_stale_running_row_does_not_block_forever(client):
+    """A crashed sync leaves state='running'; after 30 minutes it must be ignored."""
+    from datetime import datetime, timedelta, timezone
+
+    from urja.db import store
+
+    store.start_sync_run()
+    with store.connect() as conn:
+        old = (datetime.now(tz=timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
+        conn.execute("UPDATE sync_runs SET started_at=? WHERE state='running'", (old,))
+    assert client.get("/sync/status").json()["running"] is False
+
+
 @pytest.mark.parametrize("path", ["/openapi.json", "/docs", "/health"])
 def test_openapi_and_docs_are_served(client, path):
     assert client.get(path).status_code == 200
