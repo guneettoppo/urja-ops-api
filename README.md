@@ -138,7 +138,6 @@ constraint shapes everything below.
 | Target | Cost | Disk | Cold start |
 |---|---|---|---|
 | **Render** (free plan) | $0 | ephemeral | ~1 min sleeping + ~2 s boot |
-| Any VPS with Docker | from ~$4/mo | persistent | none |
 
 `render.yaml` in the repo root is the blueprint.
 
