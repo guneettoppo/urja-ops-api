@@ -21,6 +21,10 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 SCHEMA_SQL = SCHEMA_PATH.read_text(encoding="utf-8")
 
 
+def _now_iso() -> str:
+    return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+
+
 def get_db_path() -> Path:
     """Absolute path of the index file, creating its parent directory."""
     path = Path(settings.database_path)
@@ -50,8 +54,8 @@ def init_db() -> None:
 def seed_if_empty(seed_path: str | Path | None = None) -> bool:
     """Copy a prebuilt database into place when the index is empty.
 
-    Used on hosts with an ephemeral filesystem: a cold start costs a file copy
-    (~2 s) instead of a full re-sync (~4 min).
+    Only appropriate because the source data is frozen: on a host with an
+    ephemeral filesystem this turns a four-minute portal sweep into a file copy.
     """
     seed = Path(seed_path) if seed_path is not None else Path(settings.seed_db_path)
     target = get_db_path()
@@ -73,6 +77,24 @@ def seed_if_empty(seed_path: str | Path | None = None) -> bool:
             leftover.unlink()
     shutil.copyfile(seed, target)
     return True
+
+
+def mark_interrupted_runs() -> int:
+    """Close out runs left 'running' by a process that no longer exists.
+
+    This service assumes a single container, so a run marked in-flight at
+    startup must belong to a previous process that was killed mid-sync. Without
+    this, a redeploy during a sync leaves a phantom lock that blocks new syncs
+    for the full stale-run window.
+    """
+    with connect() as conn:
+        cursor = conn.execute(
+            "UPDATE sync_runs SET state='interrupted', finished_at=?, "
+            "detail=COALESCE(detail, 'process exited before the run completed') "
+            "WHERE state='running'",
+            (_now_iso(),),
+        )
+        return cursor.rowcount
 
 
 # --------------------------------------------------------------------------- #

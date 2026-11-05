@@ -196,6 +196,20 @@ def test_sync_is_blocked_while_another_run_is_in_flight(client):
     assert client.get("/sync/status").json()["running"] is True
 
 
+def test_startup_closes_runs_left_running(client):
+    """A redeploy mid-sync must not leave a phantom lock for 30 minutes."""
+    from urja.db import store
+    from urja.sync import runner
+
+    store.start_sync_run()
+    assert runner.is_running() is True
+
+    closed = store.mark_interrupted_runs()
+    assert closed == 1
+    assert runner.is_running() is False
+    assert store.latest_sync_run()["state"] == "interrupted"
+
+
 def test_stale_running_row_does_not_block_forever(client):
     """A crashed sync leaves state='running'; after 30 minutes it must be ignored."""
     from datetime import datetime, timedelta, timezone

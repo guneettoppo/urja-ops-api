@@ -52,6 +52,11 @@ async def lifespan(_app: FastAPI):
     if settings.seed_on_empty and store.seed_if_empty():
         logging.getLogger(__name__).info("seeded index from %s", settings.seed_db_path)
     store.init_db()
+    interrupted = store.mark_interrupted_runs()
+    if interrupted:
+        logging.getLogger(__name__).warning(
+            "closed %d interrupted sync run(s) left by a previous process", interrupted
+        )
     refresher: asyncio.Task | None = None
     if settings.auto_sync_on_start:
         sync_tasks.bootstrap_if_empty()
