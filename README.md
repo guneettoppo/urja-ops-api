@@ -9,6 +9,11 @@ into SQLite, and serves a typed, filterable, documented surface on top. Nothing
 downstream ever has to hold a portal session, sign an HMAC request, or parse a
 `dd/MM/yyyy` timestamp.
 
+**Live instance:** <https://urja-ops-api-aj94.onrender.com> —
+start at [`/docs`](https://urja-ops-api-aj94.onrender.com/docs). It runs on
+Render's free plan, so the first request after 15 minutes of idleness takes
+~60 s to wake; everything after that is ~130 ms.
+
 ```
                     ┌──────────────────────────────┐
    consumers ──────▶│  Urja Ops API  (FastAPI)     │
@@ -34,15 +39,45 @@ downstream ever has to hold a portal session, sign an HMAC request, or parse a
 
 ---
 
+## The domain in 30 seconds
+
+Zero prior context assumed. A **discom** is an electricity distribution
+company; Urja is the internal portal its operations staff use. The physical
+network is a tree, and the portal models it that way:
+
+```
+zone → circle → division → subdivision → substation → feeder → DT → meter
+```
+
+- A **DT** (distribution transformer) is the green box on a pole that steps
+  medium voltage down to what a house uses. Meters hang off a DT.
+- A **feeder** is the 11 kV line feeding many transformers.
+- A **meter** is the device on a customer's supply. *Single-phase* is a house;
+  `CT-operated` / three-phase is a larger connection. Makes in this dataset are
+  Genus, HPL and similar Indian meter vendors.
+- A **register** is the number printed by the meter, and it only ever counts
+  up — like a car odometer. **Consumption** is the difference between two
+  register readings. The portal serves registers; almost every useful question
+  is about consumption. That distinction is the single most important thing in
+  this repository.
+
+So the data behind this API is: 403 meters, each with a position in that tree,
+plus a time series of register readings. Nothing about customers — no names, no
+addresses, no billing.
+
+---
+
 ## Quick start
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). No Docker needed.
+Requires Python 3.11+ (tested on 3.14) and [uv](https://docs.astral.sh/uv/).
+No Docker, no database server, no cloud account.
 
 ```bash
-git clone <this-repo> && cd urja-ops-api
+git clone https://github.com/guneettoppo/urja-ops-api.git
+cd urja-ops-api
 
 cp .env.example .env          # then set PORTAL_EMAIL / PORTAL_PASSWORD
-uv sync                       # install dependencies
+uv sync                       # install dependencies (~5 s)
 
 uv run python -m urja.sync    # build the index (~4 min cold, 1 export + 403 calls)
 uv run uvicorn urja.main:app --port 8081
@@ -55,12 +90,42 @@ Open **http://localhost:8081/docs** for interactive docs, or
 > The service also syncs in the background on boot if the index is empty, so
 > `uvicorn` alone works — the first sync just runs while you browse `/docs`.
 
+### Configuration
+
+Everything is environment-driven (pydantic-settings). Precedence: real
+environment variables → `.env` → defaults in `urja/config.py`. Only the first
+two have no default; everything else works untouched.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `PORTAL_EMAIL` | — (**required**) | portal login |
+| `PORTAL_PASSWORD` | — (**required**) | portal password |
+| `PORTAL_BASE_URL` | `https://urja-ops.flockenergy.tech` | change only to point at a clone |
+| `DATABASE_PATH` | `./data/urja.db` | where the SQLite index lives |
+| `SEED_DB_PATH` | `./seed/urja.db` | snapshot copied in when the index is empty |
+| `SEED_ON_EMPTY` | `true` | set `false` to always sync from scratch |
+| `MAX_CONCURRENCY` | `2` | simultaneous portal requests; keep it low |
+| `POLITE_DELAY_MS` | `120` | minimum gap between portal requests |
+| `REQUEST_TIMEOUT_SECONDS` | `20` | per-request HTTP timeout |
+| `AUTO_SYNC_ON_START` | `true` | sync in the background on boot if the index is empty |
+| `SYNC_ENERGY_ON_START` | `true` | include the 403-call energy sweep on boot (**set `false` on free hosts**) |
+| `SYNC_INTERVAL_MINUTES` | `60` | refresh period for the background loop |
+| `LOG_LEVEL` | `INFO` | `DEBUG` logs every portal request |
+
+If `PORTAL_EMAIL`/`PORTAL_PASSWORD` are missing the service still starts and
+serves whatever is indexed; `/sync/status` reports a failed run with
+`"PORTAL_EMAIL / PORTAL_PASSWORD are not configured"` rather than crashing.
+
 ### Containerised
 
 ```bash
 docker build -t urja-ops-api .
 docker run -p 8081:8080 --env-file .env -v urja-data:/data urja-ops-api
 ```
+
+The image is a plain `python:3.12-slim` with dependencies installed by `uv`.
+It listens on `$PORT` (default `8080`) and keeps the index on a volume at
+`/data`.
 
 ---
 
@@ -253,7 +318,19 @@ Counts are conserved at every level: 143 + 130 + 130 zones = 403 meters.
 | GET | `/network/feeders/{code}/meters` | meters on a feeder |
 | GET | `/sync/status` | index freshness, last run, progress |
 | POST | `/sync` | trigger a sync now (`202`, `409` if running) |
-| GET | `/docs`, `/openapi.json` | rendered and machine-readable spec |
+
+**The spec.** `openapi.json` in the repo root is an OpenAPI 3.1 document
+describing *this* API — not the portal's. It is generated from the Pydantic
+models that serialise the responses, so it cannot drift from behaviour:
+
+```bash
+uv run python -m scripts.dump_openapi      # regenerate after changing a model
+```
+
+Two browser views come free with FastAPI: **`/docs`** (Swagger UI, interactive —
+every endpoint can be called from the page) and **`/openapi.json`** served live
+by the app. The committed file differs from the served one only in its
+`servers` entry, which points at `localhost` for import into Postman/Insomnia.
 
 Errors are RFC 9457 `application/problem+json` throughout:
 
@@ -339,7 +416,7 @@ the portal is unreachable and the request is worth retrying (`Retry-After` set).
 ## Testing
 
 ```bash
-uv run pytest -q      # 43 tests, ~1s, no network
+uv run pytest -q      # 46 tests, ~2 s, no network
 ```
 
 * `tests/test_parse.py` — the portal's quirks as executable assertions:
@@ -382,14 +459,38 @@ render.yaml, fly.toml  deployment configs
 
 ---
 
-## Deliverables
+## Reading this submission
 
-| What | Where |
+Mapped against the brief, so nothing has to be hunted for:
+
+| The brief asks for | Where it is |
 |---|---|
-| How the portal actually works | [`PROTOCOL.md`](./PROTOCOL.md) |
-| OpenAPI 3.1 spec of *this* API | [`openapi.json`](./openapi.json) (regenerate: `uv run python -m scripts.dump_openapi`) |
-| Interactive docs | `/docs` when running |
-| Design notes | this README |
-| Reflection | [`REFLECTION.md`](./REFLECTION.md) |
+| What was built, and how it's structured | this page — intro, diagram, **Layout** |
+| How to install, configure, run | **Quick start**, **Configuration**, **Containerised** |
+| A sample request | **Sample requests** — real captured output, not invented |
+| Assumptions | **Assumptions** |
+| Design decisions and trade-offs | **Design decisions & trade-offs** |
+| What was intentionally left out, and why | **Intentionally not built** |
+| What to improve with more time | **With more time** |
+| How the portal actually works | [`PROTOCOL.md`](./PROTOCOL.md) — the most valuable artefact here |
+| OpenAPI 3.x for the clean API | [`openapi.json`](./openapi.json), plus `/docs` when running |
+| Reflection questions | [`REFLECTION.md`](./REFLECTION.md) |
 
-Credentials live in `.env` (git-ignored). `.env.example` has placeholders only.
+### Evaluating it in five minutes
+
+1. **Read the spec, not the code.** `openapi.json`, or `/docs` on a running
+   instance — the shape of the API is the submission.
+2. **Try the question the portal cannot answer**:
+   `curl "https://urja-ops-api-aj94.onrender.com/meters?status=faulty&feeder=F-012"`
+   → 6 meters in one request.
+3. **Look at a consumption response** and note `derived: true` plus the
+   provenance in `meta` — the portal only stores cumulative registers.
+4. **Break it on purpose**: `/meters/J999999` (404), and
+   `/meters/J100050/consumption?interval=30m` (422, because that meter is daily).
+   Both are `problem+json` with a reason, not a stack trace.
+5. **Then read `PROTOCOL.md` §5 and §7** — the signed bulk export and the data
+   quality findings. That is the investigation the brief was asking for.
+
+Credentials live in `.env` (git-ignored, never in history). `.env.example` has
+placeholders only. Nothing else is needed to run this: no database server, no
+broker, no cloud account.
