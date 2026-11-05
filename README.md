@@ -441,38 +441,6 @@ render.yaml          Render blueprint (free plan)
 
 ---
 
-## Reading this submission
-
-Mapped against the brief, so nothing has to be hunted for:
-
-| The brief asks for | Where it is |
-|---|---|
-| What was built, and how it's structured | this page — intro, diagram, **Layout** |
-| How to install, configure, run | **Quick start**, **Configuration**, **Containerised** |
-| A sample request | **Sample requests** — real captured output, not invented |
-| Assumptions | **Assumptions** |
-| Design decisions and trade-offs | **Design decisions & trade-offs** |
-| What was intentionally left out, and why | **Intentionally not built** |
-| What to improve with more time | **With more time** |
-| How the portal actually works | [`PROTOCOL.md`](./PROTOCOL.md) — the most valuable artefact here |
-| OpenAPI 3.x for the clean API | [`openapi.json`](./openapi.json), plus `/docs` when running |
-| Reflection questions | [`REFLECTION.md`](./REFLECTION.md) |
-
-### Evaluating it in five minutes
-
-1. **Read the spec, not the code.** `openapi.json`, or `/docs` on a running
-   instance — the shape of the API is the submission.
-2. **Try the question the portal cannot answer**:
-   `curl "https://urja-ops-api-aj94.onrender.com/meters?status=faulty&feeder=F-012"`
-   → 6 meters in one request.
-3. **Look at a consumption response** and note `derived: true` plus the
-   provenance in `meta` — the portal only stores cumulative registers.
-4. **Break it on purpose**: `/meters/J999999` (404), and
-   `/meters/J100050/consumption?interval=30m` (422, because that meter is daily).
-   Both are `problem+json` with a reason, not a stack trace.
-5. **Then read `PROTOCOL.md` §5 and §7** — the signed bulk export and the data
-   quality findings. That is the investigation the brief was asking for.
-
 Credentials live in `.env` (git-ignored, never in history). `.env.example` has
 placeholders only. Nothing else is needed to run this: no database server, no
 broker, no cloud account.
