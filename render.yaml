@@ -1,0 +1,37 @@
+# Render blueprint — free tier, no credit card.
+#
+#   Dashboard → New → Blueprint → pick this repo.
+#
+# The free plan has an ephemeral filesystem and spins down after 15 minutes of
+# inactivity, so the index cannot persist. That is fine here: `seed/urja.db` is
+# copied into place on boot (~1 s) instead of re-syncing the portal (~4 min).
+#
+# PORTAL_EMAIL / PORTAL_PASSWORD are `sync: false`: Render prompts for them and
+# stores them as secrets, so they never live in the repo.
+
+services:
+  - type: web
+    name: urja-ops-api
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_PATH
+        value: /tmp/urja.db
+      - key: PORT
+        value: 10000
+      - key: AUTO_SYNC_ON_START
+        value: "true"
+      # Metadata-only refresh: a full energy sweep would take ~4 min on every
+      # cold start, and this dataset is frozen anyway. Set to "true" if the
+      # portal starts returning new readings.
+      - key: SYNC_ENERGY_ON_START
+        value: "false"
+      - key: SYNC_INTERVAL_MINUTES
+        value: "360"
+      - key: PORTAL_EMAIL
+        sync: false
+      - key: PORTAL_PASSWORD
+        sync: false

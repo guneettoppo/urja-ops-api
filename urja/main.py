@@ -49,6 +49,8 @@ locally, and serves a documented, typed, queryable surface on top.
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if settings.seed_on_empty and store.seed_if_empty():
+        logging.getLogger(__name__).info("seeded index from %s", settings.seed_db_path)
     store.init_db()
     refresher: asyncio.Task | None = None
     if settings.auto_sync_on_start:

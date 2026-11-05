@@ -1,0 +1,43 @@
+# Fly.io — always-on single machine with a persistent volume (~$2.40/month).
+#
+#   fly launch --no-deploy --copy-config --name urja-ops-api
+#   fly secrets set PORTAL_EMAIL=... PORTAL_PASSWORD=...
+#   fly volumes create urja_data --size 1 --region bom
+#   fly deploy
+#
+# The volume is what makes this the "real" option: the index survives restarts,
+# so the service is up in seconds and the hourly sync keeps it current.
+
+app = "urja-ops-api"
+primary_region = "bom" # Mumbai; `iad`/`ewr` are the cheapest regions
+
+[build]
+
+[env]
+  PORT = "8080"
+  DATABASE_PATH = "/data/urja.db"
+  AUTO_SYNC_ON_START = "true"
+  SYNC_ENERGY_ON_START = "false"
+  SYNC_INTERVAL_MINUTES = "360"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/health"
+
+[[mounts]]
+  source = "urja_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

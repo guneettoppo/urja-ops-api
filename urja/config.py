@@ -19,6 +19,15 @@ class Settings(BaseSettings):
 
     # --- our service ---
     database_path: Path = REPO_ROOT / "data" / "urja.db"
+    seed_db_path: Path = REPO_ROOT / "seed" / "urja.db"
+    """Pre-built index copied into place when ``database_path`` is empty.
+
+    Free hosting tiers have an ephemeral filesystem, so the index is lost on
+    every restart. Seeding makes a cold start instant instead of a four-minute
+    sync; with live portal data this would be wrong, but this dataset is frozen.
+    """
+
+    seed_on_empty: bool = True
     request_timeout_seconds: float = 20.0
     """Per-request HTTP timeout against the portal."""
 

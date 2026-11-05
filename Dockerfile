@@ -17,6 +17,7 @@ RUN uv sync --frozen --no-dev
 
 COPY urja ./urja
 COPY scripts ./scripts
+COPY seed ./seed
 
 # The index is derived data: mount this as a volume to survive restarts.
 RUN mkdir -p /data
@@ -24,6 +25,6 @@ VOLUME ["/data"]
 
 EXPOSE 8080
 
-# On first boot the index is empty, so the app syncs in the background and
-# serves whatever is already indexed meanwhile.
-CMD ["uv", "run", "uvicorn", "urja.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# On first boot the index is empty, so the app seeds from `seed/urja.db` and
+# then syncs in the background. PORT lets Render/Fly inject their own port.
+CMD ["sh", "-c", "uv run uvicorn urja.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

@@ -7,6 +7,7 @@ One connection per operation (sqlite3 is cheap to open and this dataset is
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -17,9 +18,11 @@ from urja.config import settings
 from urja.portal.parse import to_iso
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+SCHEMA_SQL = SCHEMA_PATH.read_text(encoding="utf-8")
 
 
-def _target() -> Path:
+def get_db_path() -> Path:
+    """Absolute path of the index file, creating its parent directory."""
     path = Path(settings.database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
@@ -27,7 +30,7 @@ def _target() -> Path:
 
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(_target(), timeout=30)
+    conn = sqlite3.connect(get_db_path(), timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -40,8 +43,36 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 
 def init_db() -> None:
-    with connect() as conn:
-        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    with sqlite3.connect(get_db_path()) as conn:
+        conn.executescript(SCHEMA_SQL)
+
+
+def seed_if_empty(seed_path: str | Path | None = None) -> bool:
+    """Copy a prebuilt database into place when the index is empty.
+
+    Used on hosts with an ephemeral filesystem: a cold start costs a file copy
+    (~2 s) instead of a full re-sync (~4 min).
+    """
+    seed = Path(seed_path) if seed_path is not None else Path(settings.seed_db_path)
+    target = get_db_path()
+    if target.exists() and target.stat().st_size > 0:
+        with sqlite3.connect(target) as conn:
+            try:
+                count = conn.execute("SELECT COUNT(*) FROM meters").fetchone()[0]
+            except sqlite3.Error:
+                count = 0
+        if count:
+            return False
+    if not seed.exists() or seed.resolve() == target.resolve():
+        return False
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", "-wal", "-shm"):
+        leftover = Path(str(target) + suffix)
+        if leftover.exists():
+            leftover.unlink()
+    shutil.copyfile(seed, target)
+    return True
 
 
 # --------------------------------------------------------------------------- #

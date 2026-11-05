@@ -64,6 +64,86 @@ docker run -p 8081:8080 --env-file .env -v urja-data:/data urja-ops-api
 
 ---
 
+## Deploying it
+
+The service is stateful (a SQLite index plus a background sync), so placement
+comes down to one question: **does the host keep a disk?**
+
+| Target | Cost | Disk | Cold start | Use when |
+|---|---|---|---|---|
+| **Render** (free plan) | $0 | ephemeral | ~1 min sleeping + ~2 s boot | you want a public URL today, no card |
+| **Fly.io** (`shared-cpu-1x`, 256 MB, 1 GB volume) | ~$2.40/mo | persistent | none, always on | a link you can put in an application |
+| Any VPS (Hetzner, etc.) | from ~$4/mo | persistent | none | you want a box to keep for other things |
+
+Both configs are committed: `render.yaml` and `fly.toml`.
+
+### The seed database
+
+Free tiers throw the filesystem away on every deploy, restart and spin-down. A
+cold start would therefore re-sync the portal — 404 requests, about four
+minutes, on every wake-up. That is a bad first impression for a reviewer who
+just clicked the link.
+
+`seed/urja.db` is a committed snapshot (2.3 MB, 403 meters, 16,384 readings).
+On boot, if the index is empty, it is copied into place — **~1 s** instead of
+~4 min:
+
+```bash
+uv run python -m scripts.build_seed     # rebuild after a sync
+```
+
+This is only defensible because the portal's data is frozen at 2026-06-30. If
+the readings were live, a committed snapshot would be a correctness bug; the
+container would need a volume and a real sync instead.
+
+### Render (free, no card)
+
+1. Push this repo to GitHub (done).
+2. Render dashboard → **New → Blueprint** → select the repo. It reads
+   `render.yaml`.
+3. It prompts for `PORTAL_EMAIL` and `PORTAL_PASSWORD` (they are `sync: false`,
+   so they stay in Render's secret store and never enter the repo).
+4. Deploy. First boot seeds the index and serves `/docs` immediately.
+
+Free-plan caveats, stated plainly: the service sleeps after 15 minutes idle and
+takes about a minute to wake, the filesystem is wiped on every restart (hence
+the seed), and the monthly allowance is 750 instance hours across the
+workspace.
+
+### Fly.io (persistent, ~$2.30/mo)
+
+```bash
+curl -L https://fly.io/install.sh | sh
+fly auth signup                              # or: fly auth login
+
+fly launch --no-deploy --copy-config --name urja-ops-api
+fly volumes create urja_data --size 1 --region bom
+fly secrets set PORTAL_EMAIL=... PORTAL_PASSWORD=...
+fly deploy
+```
+
+`fly.toml` mounts the volume at `/data`, runs one always-on `shared-cpu-1x`
+machine in Mumbai, and health-checks `/health` every 30 s. Billing is
+per-second while the machine runs; volumes bill on provisioned size
+($0.15/GB-month).
+
+> This config was written against Fly's current schema but **not** validated
+> with `flyctl` — no Fly account was available here. Run `fly config validate`
+> before your first deploy.
+
+### Anywhere else
+
+The image is a plain Dockerfile with no external services. Set `PORT`,
+`DATABASE_PATH`, `PORTAL_EMAIL` and `PORTAL_PASSWORD`, mount a volume for the
+index if you want it to survive restarts, and let `AUTO_SYNC_ON_START` do the
+rest. Nothing else is required — no broker, no cache, no managed database.
+
+> The brief asks how to *run* it; deployment is optional. If you deploy, set
+> `SYNC_ENERGY_ON_START=false` (as both configs do): a full energy sweep costs
+> four minutes and the data is frozen, so it buys nothing on a free tier.
+
+---
+
 ## Sample requests
 
 List faulty meters on a feeder — a query the portal cannot answer at all:
@@ -289,11 +369,13 @@ urja/
     parse.py         day-first dates, "" → null, registers → readings
   db/
     schema.sql       meters, dts, readings, sync_runs, meta
-    store.py         queries + upserts
+    store.py         queries, upserts, seed install
   sync/runner.py     export + paced energy sweep, idempotent
   api/               meters, consumption, network, system
+seed/urja.db         committed index snapshot for ephemeral hosts
 tests/               parser unit tests + API behaviour tests
-scripts/dump_openapi.py
+scripts/             dump_openapi.py, build_seed.py
+render.yaml, fly.toml  deployment configs
 ```
 
 `portal/` is the seam: replace the legacy system and only that directory changes.
