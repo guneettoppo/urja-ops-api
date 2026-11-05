@@ -131,16 +131,16 @@ It listens on `$PORT` (default `8080`) and keeps the index on a volume at
 
 ## Deploying it
 
-The service is stateful (a SQLite index plus a background sync), so placement
-comes down to one question: **does the host keep a disk?**
+It runs on **Render's free plan**. The service is stateful — a SQLite index plus
+a background sync — and the free tier has an ephemeral filesystem. That single
+constraint shapes everything below.
 
-| Target | Cost | Disk | Cold start | Use when |
-|---|---|---|---|---|
-| **Render** (free plan) | $0 | ephemeral | ~1 min sleeping + ~2 s boot | you want a public URL today, no card |
-| **Fly.io** (`shared-cpu-1x`, 256 MB, 1 GB volume) | ~$2.40/mo | persistent | none, always on | a link you can put in an application |
-| Any VPS (Hetzner, etc.) | from ~$4/mo | persistent | none | you want a box to keep for other things |
+| Target | Cost | Disk | Cold start |
+|---|---|---|---|
+| **Render** (free plan) | $0 | ephemeral | ~1 min sleeping + ~2 s boot |
+| Any VPS with Docker | from ~$4/mo | persistent | none |
 
-Both configs are committed: `render.yaml` and `fly.toml`.
+`render.yaml` in the repo root is the blueprint.
 
 ### The seed database
 
@@ -170,31 +170,14 @@ container would need a volume and a real sync instead.
    so they stay in Render's secret store and never enter the repo).
 4. Deploy. First boot seeds the index and serves `/docs` immediately.
 
+Live: <https://urja-ops-api-aj94.onrender.com/docs>
+
 Free-plan caveats, stated plainly: the service sleeps after 15 minutes idle and
-takes about a minute to wake, the filesystem is wiped on every restart (hence
-the seed), and the monthly allowance is 750 instance hours across the
+takes about a minute to wake; the filesystem is wiped on every restart (hence
+the seed), so the index reverts to it and a `/sync` run does not survive a
+restart; and the allowance is 750 instance hours per workspace per month — 24/7
+running is ~730 h, so it fits, but only if no other free service shares the
 workspace.
-
-### Fly.io (persistent, ~$2.30/mo)
-
-```bash
-curl -L https://fly.io/install.sh | sh
-fly auth signup                              # or: fly auth login
-
-fly launch --no-deploy --copy-config --name urja-ops-api
-fly volumes create urja_data --size 1 --region bom
-fly secrets set PORTAL_EMAIL=... PORTAL_PASSWORD=...
-fly deploy
-```
-
-`fly.toml` mounts the volume at `/data`, runs one always-on `shared-cpu-1x`
-machine in Mumbai, and health-checks `/health` every 30 s. Billing is
-per-second while the machine runs; volumes bill on provisioned size
-($0.15/GB-month).
-
-> This config was written against Fly's current schema but **not** validated
-> with `flyctl` — no Fly account was available here. Run `fly config validate`
-> before your first deploy.
 
 ### Anywhere else
 
@@ -203,9 +186,9 @@ The image is a plain Dockerfile with no external services. Set `PORT`,
 index if you want it to survive restarts, and let `AUTO_SYNC_ON_START` do the
 rest. Nothing else is required — no broker, no cache, no managed database.
 
-> The brief asks how to *run* it; deployment is optional. If you deploy, set
-> `SYNC_ENERGY_ON_START=false` (as both configs do): a full energy sweep costs
-> four minutes and the data is frozen, so it buys nothing on a free tier.
+> The brief asks how to *run* it; deployment is optional. On a free host set
+> `SYNC_ENERGY_ON_START=false` (as `render.yaml` does): a full energy sweep costs
+> four minutes and the data is frozen, so it buys nothing.
 
 ---
 
@@ -452,7 +435,7 @@ urja/
 seed/urja.db         committed index snapshot for ephemeral hosts
 tests/               parser unit tests + API behaviour tests
 scripts/             dump_openapi.py, build_seed.py
-render.yaml, fly.toml  deployment configs
+render.yaml          Render blueprint (free plan)
 ```
 
 `portal/` is the seam: replace the legacy system and only that directory changes.

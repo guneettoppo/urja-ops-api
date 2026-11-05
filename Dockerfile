@@ -26,5 +26,5 @@ VOLUME ["/data"]
 EXPOSE 8080
 
 # On first boot the index is empty, so the app seeds from `seed/urja.db` and
-# then syncs in the background. PORT lets Render/Fly inject their own port.
+# then syncs in the background. PORT lets the host inject its own port.
 CMD ["sh", "-c", "uv run uvicorn urja.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
