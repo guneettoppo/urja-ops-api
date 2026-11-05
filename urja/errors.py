@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 PROBLEM_CONTENT_TYPE = "application/problem+json"
 
@@ -65,6 +66,24 @@ def register(app) -> None:  # noqa: ANN001 - FastAPI instance
             headers["retry-after"] = str(exc.extra.get("retryAfterSeconds", 30))
         return JSONResponse(
             exc.body(request), status_code=exc.status, headers=headers, media_type=PROBLEM_CONTENT_TYPE
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        # Covers what we never raise ourselves: unmatched routes, 405s, and any
+        # HTTPException from a dependency. Without this, those responses are
+        # plain `{"detail": ...}` JSON and break the "one error shape" promise.
+        phrase = exc.detail if isinstance(exc.detail, str) else "Request failed"
+        problem = Problem(
+            exc.status_code,
+            phrase,
+            f"{request.method} {request.url.path} could not be served.",
+        )
+        return JSONResponse(
+            problem.body(request),
+            status_code=exc.status_code,
+            media_type=PROBLEM_CONTENT_TYPE,
+            headers=getattr(exc, "headers", None),
         )
 
     @app.exception_handler(RequestValidationError)

@@ -126,6 +126,20 @@ def test_consumption_of_missing_meter_is_404(client):
     assert client.get("/meters/nope/consumption").status_code == 404
 
 
+def test_unknown_route_is_problem_json(client):
+    """Even paths we never routed must fail in the documented shape."""
+    resp = client.get("/does-not-exist")
+    assert resp.status_code == 404
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    assert resp.json()["instance"] == "/does-not-exist"
+
+
+def test_wrong_method_is_problem_json(client):
+    resp = client.post("/meters")
+    assert resp.status_code == 405
+    assert resp.headers["content-type"].startswith("application/problem+json")
+
+
 # --------------------------------------------------------------------------- #
 # network + system
 # --------------------------------------------------------------------------- #
